@@ -13,4 +13,7 @@ $ stack 2018/1/1.hs < 2018/1/input.txt
 These solutions aren't meant to show best practices. They're quick and dirty.
 They are probably too clever for their own good.
 
+You can find other solutions, both in Haskell and other languages, on this list:
+<https://github.com/Bogdanp/awesome-advent-of-code>.
+
 [Stack]: https://docs.haskellstack.org/en/stable/README/
