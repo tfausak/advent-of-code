@@ -25,7 +25,7 @@ solve list = case list of
       $ filter ((/= next) . fst) list
     in next : solve rest
 
-data Requirement = Requirement { before, after :: Char } deriving Show
+data Requirement = Requirement { before, after :: Char }
 
 instance Read Requirement where
   readsPrec _ = Parse.readP_to_S $ Requirement
