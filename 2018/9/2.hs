@@ -1,5 +1,6 @@
 -- stack --resolver lts-12.0 script
 import qualified Data.Map as Map
+import qualified Data.Sequence as Seq
 
 main
   = print
@@ -15,7 +16,7 @@ main
 solve [ playerCount, lastMarble ] = let limit = lastMarble * 100 in foldr
   play
   ( Map.fromList $ zip [ 0 .. playerCount - 1 ] (repeat 0)
-  , Deque [] [0]
+  , Seq.singleton 0
   )
   [ limit, limit - 1 .. 1 ]
 
@@ -27,29 +28,23 @@ play marble ( scores, circle ) =
     )
   else ( scores, snoc marble $ rotate (-1) circle )
 
-data Deque a = Deque [ a ] [ a ]
-
 rotate n deque
   | n > 0 = rotate (n - 1) $ shiftRight deque
   | n < 0 = rotate (n + 1) $ shiftLeft deque
   | otherwise = deque
 
-shiftLeft deque = maybe deque (uncurry snoc) $ uncons deque
+shiftLeft q = maybe q (uncurry snoc) $ uncons q
 
-shiftRight deque = maybe deque (uncurry cons) $ unsnoc deque
+shiftRight q = maybe q (uncurry cons) $ unsnoc q
 
-cons x (Deque l r) = Deque l (x : r)
+cons x q = x Seq.<| q
 
-uncons (Deque l r) = case r of
-  h : t -> Just ( h, Deque l t )
-  [] -> case reverse l of
-    h : t -> Just ( h, Deque [] t )
-    [] -> Nothing
+uncons q = case Seq.viewl q of
+  Seq.EmptyL -> Nothing
+  h Seq.:< t -> Just ( h, t )
 
-snoc x (Deque l r) = Deque (x : l) r
+snoc x q = q Seq.|> x
 
-unsnoc (Deque l r) = case l of
-  h : t -> Just ( h, Deque t r )
-  [] -> case reverse r of
-    h : t -> Just ( h, Deque t [] )
-    [] -> Nothing
+unsnoc q = case Seq.viewr q of
+  Seq.EmptyR -> Nothing
+  t Seq.:> h -> Just ( h, t )
