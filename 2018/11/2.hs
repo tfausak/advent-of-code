@@ -1,34 +1,33 @@
 -- stack --resolver lts-12.0 script
 import qualified Data.Array as Array
+import Data.IORef
+import Debug.Trace
 
 main = do
-  serial <- read <$> getContents
   let
-    ( minX, maxX ) = ( 1, 300 )
-    ( minY, maxY ) = ( 1, 300 )
-    points = concatMap
-      (\ x -> map
-        (\ y -> ( x, y ))
-        [ minY .. maxY ])
-      [ minX .. maxX ]
-    cells = Array.array
-      ( ( minX, minY ), ( maxX, maxY ) )
-      (map (\ p -> ( p, cellPower serial p )) points)
-  -- TODO: This is too slow.
-  print . maximum $ concatMap
-    (\ size -> map
-      (\ point -> ( squarePower cells size point, point, size ))
-      points)
-    [ 1 .. 300 ]
+    x1 = 1
+    x2 = 300
+    y1 = x1
+    y2 = x2
+    n = 7139
+    xs = Array.array ( ( x1, y1 ), ( x2, y2 ) )
+      . flip concatMap [ y1 .. y2 ] $ \ y ->
+        flip map [ x1 .. x2 ] $ \ x ->
+          ( ( x, y ), level n x y )
+  ref <- newIORef minBound
+  flip mapM_ [ y1 .. y2 ] $ \ y -> do
+    print y
+    flip mapM_ [ x1 .. x2 ] $ \ x -> do
+      print x
+      flip mapM_ [ 1 .. min x2 y2 - max x y ] $ \ s ->
+        modifyIORef' ref $ \ ( n', x', y', s' ) ->
+          let n = power xs x y s
+          in if n > n' then ( n, x, y, s ) else ( n', x', y', s' )
+  print . (\ x -> x :: ( Int, Int, Int, Int )) =<< readIORef ref
 
-squarePower cells size ( left, top ) =
-  let ( ( x1, y1 ), ( x2, y2 ) ) = Array.bounds cells
-  in if left < x1 || left + size >= x2 || top < y1 || top + size >= y2
-  then Nothing
-  else Just . sum $ concatMap
-    (\ x -> map
-      (\ y -> cells Array.! ( x, y ))
-      [ top .. top + size - 1])
-    [ left .. left + size - 1 ]
+power xs x y s =
+  sum . flip concatMap [ y .. y + s - 1 ] $ \ y' ->
+    flip map [ x .. x + s - 1 ] $ \ x' ->
+      xs Array.! ( x', y' )
 
-cellPower n ( x, y ) = (mod (div ((((x + 10) * y) + n) * (x + 10)) 100) 10) - 5
+level n x y = mod (div ((((x + 10) * y) + n) * (x + 10)) 100) 10 - 5
