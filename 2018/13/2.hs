@@ -8,7 +8,7 @@ import qualified System.Exit as Exit
 
 main :: IO ()
 main = do
-  contents <- readFile "input.txt"
+  contents <- getContents
   let
     (tracks, carts) = Bifunctor.bimap Map.fromList Map.fromList
       (Either.partitionEithers (concatMap

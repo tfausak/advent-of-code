@@ -5,7 +5,7 @@ import qualified Data.Map as Map
 import qualified Data.Tuple as Tuple
 
 main = do
-  contents <- readFile "input.txt"
+  contents <- getContents
   let
     (tracks, carts) = Bifunctor.bimap Map.fromList Map.fromList
       (Either.partitionEithers (concatMap
