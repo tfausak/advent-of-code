@@ -3,7 +3,9 @@ import qualified Control.Monad.Trans.Writer as Writer
 import qualified Data.Foldable as Foldable
 import qualified Data.List as List
 import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Ord as Ord
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 
 
@@ -97,17 +99,69 @@ simulateTurn area point =
     Just unit -> do
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
       let targets = findTargets (unitRace unit) (areaUnits area)
-      let adjacentTargets = Map.restrictKeys targets (adjacentPoints point)
+      let adjacentTargets = Map.restrictKeys targets (neighbors point)
       if Map.null adjacentTargets
         then do
           Writer.tell ["Found " <> pluralize "target" (Map.size targets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList targets)) <> "."]
           let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
-                (map adjacentPoints (Map.keys targets))))
+                (map neighbors (Map.keys targets))))
           Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
-          pure area -- TODO: step toward nearest reachable target
+          case findNextStep area point points of
+            Nothing -> do
+              Writer.tell ["Staying put."]
+              pure area
+            Just newPoint -> do
+              Writer.tell ["Moving to " <> renderPoint newPoint <> "."]
+              pure (updateUnits (Map.insert newPoint unit . Map.delete point) area)
         else do
           Writer.tell ["Found " <> pluralize "adjacent target" (Map.size adjacentTargets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList adjacentTargets)) <> "."]
           pure area -- TODO: fight weakest enemy
+
+
+findNextStep :: Area -> Point -> [Point] -> Maybe Point
+findNextStep area current
+  = fmap snd
+  . safeMinimum
+  . concatMap (\target -> let
+    costs = computeCosts area target
+    withCost point = case Map.lookup point costs of
+      Nothing -> Nothing
+      Just cost -> Just (cost, point)
+    in Maybe.mapMaybe withCost (Set.toList (neighbors current)))
+
+
+safeMinimum :: Ord a => [a] -> Maybe a
+safeMinimum xs = if null xs then Nothing else Just (minimum xs)
+
+
+type Costs = Map.Map Point Cost
+
+
+computeCosts :: Area -> Point -> Costs
+computeCosts area point =
+  computeCostsWith area Map.empty (Seq.singleton (point, Cost 0))
+
+
+computeCostsWith :: Area -> Costs -> Seq.Seq (Point, Cost) -> Costs
+computeCostsWith area visited frontier = case Seq.viewl frontier of
+  Seq.EmptyL -> visited
+  (first, current) Seq.:< rest -> let
+    newCosts = Map.insert first current visited
+    newPoints = Maybe.mapMaybe
+      (\point -> if Map.member point visited || isOccupied area point
+        then Nothing
+        else Just (point, overCost (+ 1) current))
+      (Set.toAscList (neighbors first))
+    in computeCostsWith area newCosts (rest <> Seq.fromList newPoints)
+
+
+newtype Cost = Cost
+  { unwrapCost :: Int
+  } deriving (Eq, Ord, Show)
+
+
+overCost :: (Int -> Int) -> Cost -> Cost
+overCost f = Cost . f . unwrapCost
 
 
 isOccupied :: Area -> Point -> Bool
@@ -116,8 +170,8 @@ isOccupied area point
   || Map.member point (areaUnits area)
 
 
-adjacentPoints :: Point -> Set.Set Point
-adjacentPoints point = Set.fromList
+neighbors :: Point -> Set.Set Point
+neighbors point = Set.fromList
   [ updateX (overX (+ 1)) point
   , updateX (overX (subtract 1)) point
   , updateY (overY (+ 1)) point
