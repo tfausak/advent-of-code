@@ -1,7 +1,8 @@
 -- stack --resolver lts-12.0 script
+import qualified Control.Monad.Trans.Writer as Writer
+import qualified Data.Foldable as Foldable
 import qualified Data.List as List
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
 import qualified Data.Ord as Ord
 import qualified Data.Set as Set
 
@@ -9,8 +10,20 @@ import qualified Data.Set as Set
 main :: IO ()
 main = do
   input <- readFile "input.txt"
-  area <- either fail pure $ parseArea input
-  putStrLn . Maybe.fromJust $ renderArea area
+  initialArea <- either fail pure (parseArea input)
+  printArea initialArea
+  mapM_
+    (\((_, area), logs) -> do
+      mapM_ putStrLn logs
+      printArea area)
+    (take 1 (simulate initialRound initialArea))
+
+
+printArea :: Area -> IO ()
+printArea area = maybe
+  (fail ("invalid area: " <> show area))
+  putStrLn
+  (renderArea area)
 
 
 renderArea :: Area -> Maybe String
@@ -33,6 +46,58 @@ renderArea area = do
         Nothing -> if Set.member point walls then '#' else '.')
       [minX .. maxX])
     [minY .. maxY]))
+
+
+simulate :: Round -> Area -> [((Round, Area), [String])]
+simulate round_ area = let
+  (nextArea, logs) = Writer.runWriter (simulateRound round_ area)
+  nextRound = overRound (+ 1) round_
+  in ((nextRound, nextArea), logs) : simulate nextRound nextArea
+
+
+hasEnded :: Area -> Bool
+hasEnded
+  = (== 1)
+  . length
+  . List.group
+  . map unitRace
+  . Map.elems
+  . unwrapUnits
+  . areaUnits
+
+
+newtype Round = Round
+  { unwrapRound :: Int
+  } deriving (Show)
+
+
+initialRound :: Round
+initialRound = Round 0
+
+
+overRound :: (Int -> Int) -> Round -> Round
+overRound f = Round . f. unwrapRound
+
+
+renderRound :: Round -> String
+renderRound = show . unwrapRound
+
+
+simulateRound :: Round -> Area -> Writer.Writer [String] Area
+simulateRound round_ area = do
+  Writer.tell ["Starting round " <> renderRound round_ <> "."]
+  Foldable.foldlM simulateTurn area (Map.keys (unwrapUnits (areaUnits area)))
+
+
+simulateTurn :: Area -> Point -> Writer.Writer [String] Area
+simulateTurn area point =
+  case Map.lookup point (unwrapUnits (areaUnits area)) of
+    Nothing -> do
+      Writer.tell ["Failed to find unit at " <> renderPoint point <> "!"]
+      pure area
+    Just unit -> do
+      Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
+      pure area -- TODO
 
 
 data Area = Area
@@ -100,6 +165,15 @@ makeUnit :: Serial -> Race -> (Serial, Unit)
 makeUnit serial race = (overSerial (+ 1) serial, Unit serial race (Health 200))
 
 
+renderUnit :: Unit -> String
+renderUnit unit
+  = renderRace (unitRace unit)
+  <> "-"
+  <> renderSerial (unitSerial unit)
+  <> "@"
+  <> renderHealth (unitHealth unit)
+
+
 newtype Serial = Serial
   { unwrapSerial :: Int
   } deriving (Show)
@@ -109,15 +183,29 @@ overSerial :: (Int -> Int) -> Serial -> Serial
 overSerial f = Serial . f . unwrapSerial
 
 
+renderSerial :: Serial -> String
+renderSerial = show . unwrapSerial
+
+
 data Race
   = RaceElf
   | RaceGoblin
-  deriving (Show)
+  deriving (Eq, Show)
+
+
+renderRace :: Race -> String
+renderRace race = case race of
+  RaceElf -> "Elf"
+  RaceGoblin -> "Goblin"
 
 
 newtype Health = Health
   { unwrapHealth :: Int
   } deriving (Show)
+
+
+renderHealth :: Health -> String
+renderHealth = show . unwrapHealth
 
 
 newtype Walls = Walls
@@ -158,8 +246,17 @@ instance Ord Point where
 
 pointed :: (a -> Either String b) -> (Point, a) -> Either String (Point, b)
 pointed parse (point, input) = case parse input of
-  Left message -> Left ("at " <> show point <> ": " <> message)
+  Left message -> Left ("at " <> renderPoint point <> ": " <> message)
   Right output -> Right (point, output)
+
+
+renderPoint :: Point -> String
+renderPoint point
+  = "<"
+  <> renderX (pointX point)
+  <> ","
+  <> renderY (pointY point)
+  <> ">"
 
 
 withPoints :: [[a]] -> [(Point, a)]
@@ -182,6 +279,10 @@ withXs :: [a] -> [(X, a)]
 withXs = zip (map X [0 ..])
 
 
+renderX :: X -> String
+renderX = show . unwrapX
+
+
 newtype Y = Y
   { unwrapY :: Int
   } deriving (Eq, Ord, Show)
@@ -194,3 +295,7 @@ instance Enum Y where
 
 withYs :: [a] -> [(Y, a)]
 withYs = zip (map Y [0 ..])
+
+
+renderY :: Y -> String
+renderY = show . unwrapY
