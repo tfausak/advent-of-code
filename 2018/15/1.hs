@@ -100,24 +100,37 @@ simulateTurn area point =
     Just unit -> do
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
       let targets = findTargets (unitRace unit) (areaUnits area)
-      let adjacentTargets = Map.toList (Map.restrictKeys targets (neighbors point))
-      case minimumOn (\(p, u) -> (unitHealth u, p)) adjacentTargets of
-        Nothing -> do
+      newPoint <- if any (flip Map.member targets) (neighbors point)
+        then do
+          Writer.tell ["Not moving because adjacent to target."]
+          pure point
+        else do
           Writer.tell ["Found " <> pluralize "target" (Map.size targets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList targets)) <> "."]
           let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
                 (map neighbors (Map.keys targets))))
           Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
           case findNextStep area point points of
             Nothing -> do
-              Writer.tell ["Staying put."]
-              pure area
+              Writer.tell ["Could not find a target to move towards."]
+              pure point
             Just newPoint -> do
               Writer.tell ["Moving to " <> renderPoint newPoint <> "."]
-              pure (updateUnits (Map.insert newPoint unit . Map.delete point) area)
+              pure newPoint
+      Writer.tell ["Looking for adjacent targets to attack from " <> renderPoint newPoint <> "."]
+      let adjacentTargets = Map.toList (Map.restrictKeys targets (neighbors newPoint))
+      maybeTarget <- case minimumOn (\(p, u) -> (unitHealth u, p)) adjacentTargets of
+        Nothing -> do
+          Writer.tell ["No adjacent targets to attack."]
+          pure Nothing
         Just (at, target) -> do
           Writer.tell ["Found " <> pluralize "adjacent target" (length adjacentTargets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) adjacentTargets) <> "."]
           Writer.tell ["Attacking " <> renderUnit target <> " at " <> renderPoint at <> "."]
-          pure (updateUnits (Map.filter isAlive . Map.adjust (attack unit) at) area)
+          pure (Just at)
+      pure (updateUnits
+        ( maybe id (Map.adjust (attack unit)) maybeTarget
+        . Map.insert newPoint unit
+        . Map.delete point
+        ) area)
 
 
 attack :: Unit -> Unit -> Unit
