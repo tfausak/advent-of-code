@@ -19,7 +19,7 @@ main = do
       mapM_ putStrLn logs
       printArea area
       mapM_ (putStrLn . renderUnit) (areaUnits area))
-    (take 2 (simulate initialRound initialArea))
+    (take 47 (simulate initialRound initialArea))
 
 
 printArea :: Area -> IO ()
@@ -127,7 +127,8 @@ simulateTurn area point =
           Writer.tell ["Attacking " <> renderUnit target <> " at " <> renderPoint at <> "."]
           pure (Just at)
       pure (updateUnits
-        ( maybe id (Map.adjust (attack unit)) maybeTarget
+        ( Map.filter isAlive
+        . maybe id (Map.adjust (attack unit)) maybeTarget
         . Map.insert newPoint unit
         . Map.delete point
         ) area)
