@@ -29,8 +29,8 @@ printArea area = maybe
 renderArea :: Area -> Maybe String
 renderArea area = do
   let
-    units = unwrapUnits (areaUnits area)
-    walls = unwrapWalls (areaWalls area)
+    units = areaUnits area
+    walls = areaWalls area
     xs = Set.map pointX walls
     ys = Set.map pointY walls
   minX <- Set.lookupMin xs
@@ -62,7 +62,6 @@ hasEnded
   . List.group
   . map unitRace
   . Map.elems
-  . unwrapUnits
   . areaUnits
 
 
@@ -86,35 +85,35 @@ renderRound = show . unwrapRound
 simulateRound :: Round -> Area -> Writer.Writer [String] Area
 simulateRound round_ area = do
   Writer.tell ["Starting round " <> renderRound round_ <> "."]
-  Foldable.foldlM simulateTurn area (Map.keys (unwrapUnits (areaUnits area)))
+  Foldable.foldlM simulateTurn area (Map.keys (areaUnits area))
 
 
 simulateTurn :: Area -> Point -> Writer.Writer [String] Area
 simulateTurn area point =
-  case Map.lookup point (unwrapUnits (areaUnits area)) of
+  case Map.lookup point (areaUnits area) of
     Nothing -> do
       Writer.tell ["Failed to find unit at " <> renderPoint point <> "!"]
       pure area
     Just unit -> do
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
       let targets = findTargets (unitRace unit) (areaUnits area)
-      let adjacentTargets = overUnits (flip Map.restrictKeys (adjacentPoints point)) targets
-      if Map.null (unwrapUnits adjacentTargets)
+      let adjacentTargets = Map.restrictKeys targets (adjacentPoints point)
+      if Map.null adjacentTargets
         then do
-          Writer.tell ["Found " <> pluralize "target" (Map.size (unwrapUnits targets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits targets))) <> "."]
+          Writer.tell ["Found " <> pluralize "target" (Map.size targets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList targets)) <> "."]
           let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
-                (map adjacentPoints (Map.keys (unwrapUnits targets)))))
+                (map adjacentPoints (Map.keys targets))))
           Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
           pure area -- TODO: step toward nearest reachable target
         else do
-          Writer.tell ["Found " <> pluralize "adjacent target" (Map.size (unwrapUnits adjacentTargets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits adjacentTargets))) <> "."]
+          Writer.tell ["Found " <> pluralize "adjacent target" (Map.size adjacentTargets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList adjacentTargets)) <> "."]
           pure area -- TODO: fight weakest enemy
 
 
 isOccupied :: Area -> Point -> Bool
 isOccupied area point
-  = Set.member point (unwrapWalls (areaWalls area))
-  || Map.member point (unwrapUnits (areaUnits area))
+  = Set.member point (areaWalls area)
+  || Map.member point (areaUnits area)
 
 
 adjacentPoints :: Point -> Set.Set Point
@@ -127,7 +126,7 @@ adjacentPoints point = Set.fromList
 
 
 findTargets :: Race -> Units -> Units
-findTargets race = overUnits (Map.filter ((/= race) . unitRace))
+findTargets race = Map.filter ((/= race) . unitRace)
 
 
 pluralize :: String -> Int -> String
@@ -154,7 +153,7 @@ parseArea
 
 toArea :: [(Point, Square)] -> Area
 toArea =
-  snd . foldr addSquare (Serial 1, Area (Units Map.empty) (Walls Set.empty))
+  snd . foldr addSquare (Serial 1, Area Map.empty Set.empty)
 
 
 addSquare :: (Point, Square) -> (Serial, Area) -> (Serial, Area)
@@ -168,11 +167,11 @@ addSquare (point, square) = case square of
 addUnit :: Race -> Point -> (Serial, Area) -> (Serial, Area)
 addUnit race point (serial, area) =
   let (newSerial, unit) = makeUnit serial race
-  in (newSerial, updateUnits (overUnits (Map.insert point unit)) area)
+  in (newSerial, updateUnits (Map.insert point unit) area)
 
 
 addWall :: Point -> (serial, Area) -> (serial, Area)
-addWall = fmap . updateWalls . overWalls . Set.insert
+addWall = fmap . updateWalls . Set.insert
 
 
 updateUnits :: (Units -> Units) -> Area -> Area
@@ -183,13 +182,7 @@ updateWalls :: (Walls -> Walls) -> Area -> Area
 updateWalls f area = area { areaWalls = f (areaWalls area) }
 
 
-newtype Units = Units
-  { unwrapUnits :: Map.Map Point Unit
-  } deriving (Show)
-
-
-overUnits :: (Map.Map Point Unit -> Map.Map Point Unit) -> Units -> Units
-overUnits f = Units . f . unwrapUnits
+type Units = Map.Map Point Unit
 
 
 data Unit = Unit
@@ -259,13 +252,7 @@ renderPower :: Power -> String
 renderPower = show . unwrapPower
 
 
-newtype Walls = Walls
-  { unwrapWalls :: Set.Set Point
-  } deriving (Show)
-
-
-overWalls :: (Set.Set Point -> Set.Set Point) -> Walls -> Walls
-overWalls f = Walls . f . unwrapWalls
+type Walls = Set.Set Point
 
 
 data Square
