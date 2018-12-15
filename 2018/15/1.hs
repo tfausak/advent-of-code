@@ -97,7 +97,21 @@ simulateTurn area point =
       pure area
     Just unit -> do
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
+      let targets = findTargets (unitRace unit) (areaUnits area)
+      Writer.tell ["Found " <> pluralize "target" (Map.size (unwrapUnits targets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits targets))) <> "."]
       pure area -- TODO
+
+
+findTargets :: Race -> Units -> Units
+findTargets race = overUnits (Map.filter ((/= race) . unitRace))
+
+
+pluralize :: String -> Int -> String
+pluralize word count
+  = show count
+  <> " "
+  <> word
+  <> if count == 1 then "" else "s"
 
 
 data Area = Area
