@@ -145,16 +145,28 @@ isAlive :: Unit -> Bool
 isAlive = (> 0) . unwrapHealth . unitHealth
 
 
-findNextStep :: Area -> Point -> [Point] -> Maybe Point
-findNextStep area current
-  = fmap snd
-  . minimumMaybe
-  . concatMap (\target -> let
-    costs = computeCosts area target
-    withCost point = case Map.lookup point costs of
+findNextStep
+  :: Area
+  -> Point -- where i am right now
+  -> [Point] -- points that are adjacent to all of my enemies
+  -> Maybe Point
+findNextStep area current points = do
+  target <- do
+    -- first compute the distance from my current position to every other point in the area
+    let
+      crumbs = breadcrumbs area (Seq.singleton current) (Map.singleton current current)
+      withCost point = case computeCost current point crumbs of
+        Nothing -> Nothing
+        Just cost -> Just (cost, point)
+    -- then find the point that's closest to me
+    fmap snd (minimumMaybe (Maybe.mapMaybe withCost points))
+  -- now that i know which point i'm heading toward, i want to find the first step to take towards it
+  let
+    crumbs = breadcrumbs area (Seq.singleton target) (Map.singleton target target)
+    withCost point = case computeCost target point crumbs of
       Nothing -> Nothing
       Just cost -> Just (cost, point)
-    in Maybe.mapMaybe withCost (Set.toList (neighbors current)))
+  fmap snd (minimumMaybe (Maybe.mapMaybe withCost (Set.toList (neighbors current))))
 
 
 minimumBy :: (a -> a -> Ordering) -> [a] -> Maybe a
@@ -174,20 +186,41 @@ type Costs = Map.Map Point Cost
 
 computeCosts :: Area -> Point -> Costs
 computeCosts area point =
-  computeCostsWith area Map.empty (Seq.singleton (point, Cost 0))
+  computeCostsWith area Map.empty (Set.singleton (point, Cost 0))
 
 
-computeCostsWith :: Area -> Costs -> Seq.Seq (Point, Cost) -> Costs
-computeCostsWith area visited frontier = case Seq.viewl frontier of
-  Seq.EmptyL -> visited
-  (first, current) Seq.:< rest -> let
-    newCosts = Map.insert first current visited
+computeCostsWith :: Area -> Costs -> Set.Set (Point, Cost) -> Costs
+computeCostsWith area visited frontier = case Set.minView frontier of
+  Nothing -> visited
+  Just ((first, current), rest) -> let
+    newCosts = Map.insertWith (\ _ y -> y) first current visited
     newPoints = Maybe.mapMaybe
       (\point -> if Map.member point visited || isOccupied area point
         then Nothing
         else Just (point, overCost (+ 1) current))
-      (Set.toAscList (neighbors first))
-    in computeCostsWith area newCosts (rest <> Seq.fromList newPoints)
+      (Set.toList (neighbors first))
+    in computeCostsWith area newCosts (rest <> Set.fromList newPoints)
+
+
+computeCost :: Point -> Point -> Map.Map Point Point -> Maybe Cost
+computeCost start goal crumbs = if goal == start
+  then Just (Cost 0)
+  else case Map.lookup goal crumbs of
+    Nothing -> Nothing
+    Just next -> fmap (overCost (+ 1)) (computeCost start next crumbs)
+
+
+breadcrumbs :: Area -> Seq.Seq Point -> Map.Map Point Point -> Map.Map Point Point
+breadcrumbs area frontier cameFrom = case Seq.viewl frontier of
+  Seq.EmptyL -> cameFrom
+  current Seq.:< rest -> let
+    (newFrontier, newCameFrom) = foldr
+      (\next (s, m) -> if Map.member next m || isOccupied area next
+        then (s, m)
+        else (s Seq.|> next, Map.insert next current m))
+      (rest, cameFrom)
+      (neighbors current)
+    in breadcrumbs area newFrontier newCameFrom
 
 
 newtype Cost = Cost
