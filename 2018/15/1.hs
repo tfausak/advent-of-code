@@ -195,20 +195,24 @@ overUnits f = Units . f . unwrapUnits
 data Unit = Unit
   { unitSerial :: Serial
   , unitRace :: Race
+  , unitPower :: Power
   , unitHealth :: Health
   } deriving (Show)
 
 
 makeUnit :: Serial -> Race -> (Serial, Unit)
-makeUnit serial race = (overSerial (+ 1) serial, Unit serial race (Health 200))
+makeUnit serial race =
+  (overSerial (+ 1) serial, Unit serial race (Power 3) (Health 200))
 
 
 renderUnit :: Unit -> String
 renderUnit unit
   = renderRace (unitRace unit)
-  <> "-"
+  <> "#"
   <> renderSerial (unitSerial unit)
-  <> "@"
+  <> "-"
+  <> renderPower (unitPower unit)
+  <> "/"
   <> renderHealth (unitHealth unit)
 
 
@@ -244,6 +248,15 @@ newtype Health = Health
 
 renderHealth :: Health -> String
 renderHealth = show . unwrapHealth
+
+
+newtype Power = Power
+  { unwrapPower :: Int
+  } deriving (Show)
+
+
+renderPower :: Power -> String
+renderPower = show . unwrapPower
 
 
 newtype Walls = Walls
