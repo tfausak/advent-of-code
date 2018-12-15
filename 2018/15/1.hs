@@ -99,7 +99,25 @@ simulateTurn area point =
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
       let targets = findTargets (unitRace unit) (areaUnits area)
       Writer.tell ["Found " <> pluralize "target" (Map.size (unwrapUnits targets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits targets))) <> "."]
+      let points = Set.toAscList (Set.fromList (filter (not . isOccupied area)
+            (concatMap adjacentPoints (Map.keys (unwrapUnits targets)))))
+      Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
       pure area -- TODO
+
+
+isOccupied :: Area -> Point -> Bool
+isOccupied area point
+  = Set.member point (unwrapWalls (areaWalls area))
+  || Map.member point (unwrapUnits (areaUnits area))
+
+
+adjacentPoints :: Point -> [Point]
+adjacentPoints point =
+  [ updateX (overX (+ 1)) point
+  , updateX (overX (subtract 1)) point
+  , updateY (overY (+ 1)) point
+  , updateY (overY (subtract 1)) point
+  ]
 
 
 findTargets :: Race -> Units -> Units
@@ -258,6 +276,14 @@ instance Ord Point where
   compare p1 p2 = Ord.comparing pointY p1 p2 <> Ord.comparing pointX p1 p2
 
 
+updateX :: (X -> X) -> Point -> Point
+updateX f point = point { pointX = f (pointX point) }
+
+
+updateY :: (Y -> Y) -> Point -> Point
+updateY f point = point { pointY = f (pointY point) }
+
+
 pointed :: (a -> Either String b) -> (Point, a) -> Either String (Point, b)
 pointed parse (point, input) = case parse input of
   Left message -> Left ("at " <> renderPoint point <> ": " <> message)
@@ -289,6 +315,10 @@ instance Enum X where
   toEnum = X
 
 
+overX :: (Int -> Int) -> X -> X
+overX f = X . f . unwrapX
+
+
 withXs :: [a] -> [(X, a)]
 withXs = zip (map X [0 ..])
 
@@ -305,6 +335,10 @@ newtype Y = Y
 instance Enum Y where
   fromEnum = unwrapY
   toEnum = Y
+
+
+overY :: (Int -> Int) -> Y -> Y
+overY f = Y . f . unwrapY
 
 
 withYs :: [a] -> [(Y, a)]
