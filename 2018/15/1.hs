@@ -1,4 +1,5 @@
 -- stack --resolver lts-12.0 script
+module Main ( main ) where
 import qualified Control.Monad.Trans.Writer as Writer
 import qualified Data.Foldable as Foldable
 import qualified Data.List as List
@@ -56,7 +57,9 @@ renderArea area = do
 
 simulate :: Round -> Area -> [((Round, Area), [String])]
 simulate round_ area = let
-  (nextArea, logs) = Writer.runWriter (simulateRound round_ area)
+  nextArea :: Area
+  logs :: [String]
+  (nextArea, logs) = Writer.runWriter (simulateRound area)
   nextRound = overRound (+ 1) round_
   in ((nextRound, nextArea), logs) : simulate nextRound nextArea
 
@@ -88,53 +91,27 @@ renderRound :: Round -> String
 renderRound = show . unwrapRound
 
 
-simulateRound :: Round -> Area -> Writer.Writer [String] Area
-simulateRound round_ area = do
-  Writer.tell ["Starting round " <> renderRound round_ <> "."]
-  Foldable.foldlM simulateTurn area (Map.keys (areaUnits area))
+simulateRound :: Monad m => Area -> m Area
+simulateRound area = Foldable.foldlM (\a p -> pure $ simulateTurn a p) area (Map.keys (areaUnits area))
 
 
-simulateTurn :: Area -> Point -> Writer.Writer [String] Area
-simulateTurn area point =
-  case Map.lookup point (areaUnits area) of
-    Nothing -> do
-      Writer.tell ["Failed to find unit at " <> renderPoint point <> "!"]
-      pure area
-    Just unit -> do
-      Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
-      let targets = findTargets (unitRace unit) (areaUnits area)
-      newPoint <- if any (flip Map.member targets) (neighbors point)
-        then do
-          Writer.tell ["Not moving because adjacent to target."]
-          pure point
-        else do
-          Writer.tell ["Found " <> pluralize "target" (Map.size targets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList targets)) <> "."]
-          let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
-                (map neighbors (Map.keys targets))))
-          Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
-          case findNextStep area point points of
-            Nothing -> do
-              Writer.tell ["Could not find a target to move towards."]
-              pure point
-            Just newPoint -> do
-              Writer.tell ["Moving to " <> renderPoint newPoint <> "."]
-              pure newPoint
-      Writer.tell ["Looking for adjacent targets to attack from " <> renderPoint newPoint <> "."]
-      let adjacentTargets = Map.toList (Map.restrictKeys targets (neighbors newPoint))
-      maybeTarget <- case minimumOn (\(p, u) -> (unitHealth u, p)) adjacentTargets of
-        Nothing -> do
-          Writer.tell ["No adjacent targets to attack."]
-          pure Nothing
-        Just (at, target) -> do
-          Writer.tell ["Found " <> pluralize "adjacent target" (length adjacentTargets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) adjacentTargets) <> "."]
-          Writer.tell ["Attacking " <> renderUnit target <> " at " <> renderPoint at <> "."]
-          pure (Just at)
-      pure (updateUnits
-        ( Map.filter isAlive
-        . maybe id (Map.adjust (attack unit)) maybeTarget
-        . Map.insert newPoint unit
-        . Map.delete point
-        ) area)
+simulateTurn :: Area -> Point -> Area
+simulateTurn area point = case Map.lookup point (areaUnits area) of
+  Nothing -> area
+  Just unit -> let
+    targets = findTargets (unitRace unit) (areaUnits area)
+    newPoint = if any (flip Map.member targets) (neighbors point) then point else let
+      points = filter (not . isOccupied area) (Set.toAscList (Set.unions
+        (map neighbors (Map.keys targets))))
+      in Maybe.fromMaybe point (findNextStep area point points)
+    adjacentTargets = Map.toList (Map.restrictKeys targets (neighbors newPoint))
+    maybeTarget = fmap fst (minimumOn (\(p, u) -> (unitHealth u, p)) adjacentTargets)
+    in updateUnits
+      ( Map.filter isAlive
+      . maybe id (Map.adjust (attack unit)) maybeTarget
+      . Map.insert newPoint unit
+      . Map.delete point
+      ) area
 
 
 attack :: Unit -> Unit -> Unit
@@ -179,27 +156,6 @@ minimumMaybe = minimumOn id
 
 minimumOn :: Ord b => (a -> b) -> [a] -> Maybe a
 minimumOn = minimumBy . Ord.comparing
-
-
-type Costs = Map.Map Point Cost
-
-
-computeCosts :: Area -> Point -> Costs
-computeCosts area point =
-  computeCostsWith area Map.empty (Set.singleton (point, Cost 0))
-
-
-computeCostsWith :: Area -> Costs -> Set.Set (Point, Cost) -> Costs
-computeCostsWith area visited frontier = case Set.minView frontier of
-  Nothing -> visited
-  Just ((first, current), rest) -> let
-    newCosts = Map.insertWith (\ _ y -> y) first current visited
-    newPoints = Maybe.mapMaybe
-      (\point -> if Map.member point visited || isOccupied area point
-        then Nothing
-        else Just (point, overCost (+ 1) current))
-      (Set.toList (neighbors first))
-    in computeCostsWith area newCosts (rest <> Set.fromList newPoints)
 
 
 computeCost :: Point -> Point -> Map.Map Point Point -> Maybe Cost
@@ -249,14 +205,6 @@ neighbors point = Set.fromList
 
 findTargets :: Race -> Units -> Units
 findTargets race = Map.filter ((/= race) . unitRace)
-
-
-pluralize :: String -> Int -> String
-pluralize word count
-  = show count
-  <> " "
-  <> word
-  <> if count == 1 then "" else "s"
 
 
 data Area = Area
