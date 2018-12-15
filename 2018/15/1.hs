@@ -13,13 +13,16 @@ main :: IO ()
 main = do
   input <- readFile "input.txt"
   initialArea <- either fail pure (parseArea input)
-  printArea initialArea
-  mapM_
-    (\((_, area), logs) -> do
-      mapM_ putStrLn logs
-      printArea area
-      mapM_ (putStrLn . renderUnit) (areaUnits area))
-    (take 47 (simulate initialRound initialArea))
+  let ((round_, area), _) = head (dropWhile
+        (not . hasEnded . snd . fst)
+        (simulate initialRound initialArea))
+  printArea area
+  putStrLn ("Completed " <> renderRound round_ <> " full rounds.")
+  let units = Map.elems (areaUnits area)
+  mapM_ (putStrLn . renderUnit) units
+  let health = sum (map (unwrapHealth . unitHealth) units)
+  print health
+  print ((unwrapRound round_ - 1) * health) -- TODO: Off by one :(
 
 
 printArea :: Area -> IO ()
