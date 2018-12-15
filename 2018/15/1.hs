@@ -99,8 +99,8 @@ simulateTurn area point =
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
       let targets = findTargets (unitRace unit) (areaUnits area)
       Writer.tell ["Found " <> pluralize "target" (Map.size (unwrapUnits targets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits targets))) <> "."]
-      let points = Set.toAscList (Set.fromList (filter (not . isOccupied area)
-            (concatMap adjacentPoints (Map.keys (unwrapUnits targets)))))
+      let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
+            (map adjacentPoints (Map.keys (unwrapUnits targets)))))
       Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
       pure area -- TODO
 
@@ -111,8 +111,8 @@ isOccupied area point
   || Map.member point (unwrapUnits (areaUnits area))
 
 
-adjacentPoints :: Point -> [Point]
-adjacentPoints point =
+adjacentPoints :: Point -> Set.Set Point
+adjacentPoints point = Set.fromList
   [ updateX (overX (+ 1)) point
   , updateX (overX (subtract 1)) point
   , updateY (overY (+ 1)) point
