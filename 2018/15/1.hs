@@ -17,8 +17,9 @@ main = do
   mapM_
     (\((_, area), logs) -> do
       mapM_ putStrLn logs
-      printArea area)
-    (take 1 (simulate initialRound initialArea))
+      printArea area
+      mapM_ (putStrLn . renderUnit) (areaUnits area))
+    (take 2 (simulate initialRound initialArea))
 
 
 printArea :: Area -> IO ()
@@ -99,9 +100,9 @@ simulateTurn area point =
     Just unit -> do
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
       let targets = findTargets (unitRace unit) (areaUnits area)
-      let adjacentTargets = Map.restrictKeys targets (neighbors point)
-      if Map.null adjacentTargets
-        then do
+      let adjacentTargets = Map.toList (Map.restrictKeys targets (neighbors point))
+      case minimumOn (\(p, u) -> (unitHealth u, p)) adjacentTargets of
+        Nothing -> do
           Writer.tell ["Found " <> pluralize "target" (Map.size targets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList targets)) <> "."]
           let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
                 (map neighbors (Map.keys targets))))
@@ -113,15 +114,24 @@ simulateTurn area point =
             Just newPoint -> do
               Writer.tell ["Moving to " <> renderPoint newPoint <> "."]
               pure (updateUnits (Map.insert newPoint unit . Map.delete point) area)
-        else do
-          Writer.tell ["Found " <> pluralize "adjacent target" (Map.size adjacentTargets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList adjacentTargets)) <> "."]
-          pure area -- TODO: fight weakest enemy
+        Just (at, target) -> do
+          Writer.tell ["Found " <> pluralize "adjacent target" (length adjacentTargets) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) adjacentTargets) <> "."]
+          Writer.tell ["Attacking " <> renderUnit target <> " at " <> renderPoint at <> "."]
+          pure (updateUnits (Map.filter isAlive . Map.adjust (attack unit) at) area)
+
+
+attack :: Unit -> Unit -> Unit
+attack = updateHealth . overHealth . subtract . unwrapPower . unitPower
+
+
+isAlive :: Unit -> Bool
+isAlive = (> 0) . unwrapHealth . unitHealth
 
 
 findNextStep :: Area -> Point -> [Point] -> Maybe Point
 findNextStep area current
   = fmap snd
-  . safeMinimum
+  . minimumMaybe
   . concatMap (\target -> let
     costs = computeCosts area target
     withCost point = case Map.lookup point costs of
@@ -130,8 +140,16 @@ findNextStep area current
     in Maybe.mapMaybe withCost (Set.toList (neighbors current)))
 
 
-safeMinimum :: Ord a => [a] -> Maybe a
-safeMinimum xs = if null xs then Nothing else Just (minimum xs)
+minimumBy :: (a -> a -> Ordering) -> [a] -> Maybe a
+minimumBy f xs = if null xs then Nothing else Just (List.minimumBy f xs)
+
+
+minimumMaybe :: Ord a => [a] -> Maybe a
+minimumMaybe = minimumOn id
+
+
+minimumOn :: Ord b => (a -> b) -> [a] -> Maybe a
+minimumOn = minimumBy . Ord.comparing
 
 
 type Costs = Map.Map Point Cost
@@ -263,6 +281,10 @@ renderUnit unit
   <> renderHealth (unitHealth unit)
 
 
+updateHealth :: (Health -> Health) -> Unit -> Unit
+updateHealth f unit = unit { unitHealth = f (unitHealth unit) }
+
+
 newtype Serial = Serial
   { unwrapSerial :: Int
   } deriving (Show)
@@ -290,11 +312,15 @@ renderRace race = case race of
 
 newtype Health = Health
   { unwrapHealth :: Int
-  } deriving (Show)
+  } deriving (Eq, Ord, Show)
 
 
 renderHealth :: Health -> String
 renderHealth = show . unwrapHealth
+
+
+overHealth :: (Int -> Int) -> Health -> Health
+overHealth f = Health . f . unwrapHealth
 
 
 newtype Power = Power
