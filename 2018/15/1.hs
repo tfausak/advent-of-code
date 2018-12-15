@@ -56,13 +56,13 @@ simulate round_ area = let
 
 
 hasEnded :: Area -> Bool
-hasEnded
-  = (== 1)
-  . length
-  . List.group
-  . map unitRace
-  . Map.elems
-  . areaUnits
+hasEnded = homogeneous . map unitRace . Map.elems . areaUnits
+
+
+homogeneous :: Eq a => [a] -> Bool
+homogeneous list = case list of
+  [] -> True
+  first : rest -> all (== first) rest
 
 
 newtype Round = Round
