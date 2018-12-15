@@ -98,11 +98,17 @@ simulateTurn area point =
     Just unit -> do
       Writer.tell ["Starting turn at " <> renderPoint point <> " with " <> renderUnit unit <> "."]
       let targets = findTargets (unitRace unit) (areaUnits area)
-      Writer.tell ["Found " <> pluralize "target" (Map.size (unwrapUnits targets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits targets))) <> "."]
-      let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
-            (map adjacentPoints (Map.keys (unwrapUnits targets)))))
-      Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
-      pure area -- TODO
+      let adjacentTargets = overUnits (flip Map.restrictKeys (adjacentPoints point)) targets
+      if Map.null (unwrapUnits adjacentTargets)
+        then do
+          Writer.tell ["Found " <> pluralize "target" (Map.size (unwrapUnits targets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits targets))) <> "."]
+          let points = filter (not . isOccupied area) (Set.toAscList (Set.unions
+                (map adjacentPoints (Map.keys (unwrapUnits targets)))))
+          Writer.tell ["Found " <> pluralize "point" (length points) <> " in range: " <> List.intercalate ", " (map renderPoint points)]
+          pure area -- TODO: step toward nearest reachable target
+        else do
+          Writer.tell ["Found " <> pluralize "adjacent target" (Map.size (unwrapUnits adjacentTargets)) <> ": " <> List.intercalate ", " (map (\(p, u) -> renderUnit u <> " at " <> renderPoint p) (Map.toAscList (unwrapUnits adjacentTargets))) <> "."]
+          pure area -- TODO: fight weakest enemy
 
 
 isOccupied :: Area -> Point -> Bool
