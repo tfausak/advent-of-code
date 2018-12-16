@@ -68,3 +68,9 @@ None of the other opcodes produce the result captured in the sample. Because of 
 You collect many of these samples (the first section of your puzzle input). The manual also includes a small test program (the second section of your puzzle input) - you can ignore it for now.
 
 Ignoring the opcode numbers, how many samples in your puzzle input behave like three or more opcodes?
+
+--- Part Two ---
+
+Using the samples you collected, work out the number of each opcode and execute the test program (the second section of your puzzle input).
+
+What value is contained in register 0 after executing the test program?
