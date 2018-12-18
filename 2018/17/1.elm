@@ -10,15 +10,32 @@ import Set
 import Svg
 import Svg.Attributes as SvgA
 import Svg.Keyed as SvgK
+import Time
 
 
 main : Program Flags Model Message
 main =
-    Browser.sandbox
+    Browser.element
         { init = initialModel
+        , subscriptions = subscriptions
         , update = update
         , view = view
         }
+
+
+subscriptions : Model -> Sub Message
+subscriptions model =
+    case model.output of
+        Err _ ->
+            Sub.none
+
+        Ok state ->
+            case state.playback of
+                Playing ->
+                    Time.every 10 (\_ -> Tick)
+
+                Paused ->
+                    Sub.none
 
 
 type alias Flags =
@@ -32,48 +49,114 @@ type alias Model =
 
 
 type Message
-    = Empty
+    = Tick
     | UpdateInput String
+    | Play
+    | Pause
     | Step
     | Reset
+    | ToggleRender
 
 
-initialModel : Model
-initialModel =
-    { input = initialInput
-    , output = parseInput initialInput
-    }
+initialModel : Flags -> ( Model, Cmd Message )
+initialModel _ =
+    ( { input = initialInput
+      , output = parseInput initialInput
+      }
+    , Cmd.none
+    )
 
 
-update : Message -> Model -> Model
+update : Message -> Model -> ( Model, Cmd Message )
 update message model =
     case message of
-        Empty ->
-            model
+        ToggleRender ->
+            case model.output of
+                Err _ ->
+                    ( model, Cmd.none )
+
+                Ok state ->
+                    ( { model
+                        | output = Ok { state | render = not state.render }
+                      }
+                    , Cmd.none
+                    )
+
+        Tick ->
+            case model.output of
+                Err _ ->
+                    ( model, Cmd.none )
+
+                Ok state ->
+                    if state.playback == Playing then
+                        let
+                            newState =
+                                step state
+                        in
+                        if newState.water == state.water then
+                            ( { model | output = Ok { state | playback = Paused } }
+                            , Cmd.none
+                            )
+
+                        else
+                            ( { model | output = Ok (step state) }, Cmd.none )
+
+                    else
+                        ( model, Cmd.none )
 
         UpdateInput input ->
-            { model
+            ( { model
                 | input = input
                 , output = parseInput input
-            }
+              }
+            , Cmd.none
+            )
+
+        Play ->
+            case model.output of
+                Err _ ->
+                    ( model, Cmd.none )
+
+                Ok state ->
+                    ( { model | output = Ok { state | playback = Playing } }
+                    , Cmd.none
+                    )
+
+        Pause ->
+            case model.output of
+                Err _ ->
+                    ( model, Cmd.none )
+
+                Ok state ->
+                    ( { model | output = Ok { state | playback = Paused } }
+                    , Cmd.none
+                    )
 
         Step ->
             case model.output of
                 Err _ ->
-                    model
+                    ( model, Cmd.none )
 
                 Ok state ->
-                    { model | output = Ok (step state) }
+                    ( { model | output = Ok (step state) }, Cmd.none )
 
         Reset ->
             case model.output of
                 Err _ ->
-                    model
+                    ( model, Cmd.none )
 
                 Ok state ->
-                    { model
-                        | output = Ok { state | iteration = 0, water = Dict.empty }
-                    }
+                    ( { model
+                        | output =
+                            Ok
+                                { state
+                                    | iteration = 0
+                                    , water = Dict.empty
+                                    , playback = Paused
+                                }
+                      }
+                    , Cmd.none
+                    )
 
 
 view : Model -> Html.Html Message
@@ -95,24 +178,42 @@ view model =
 
             Ok state ->
                 Html.div []
-                    [ Html.p []
-                        [ Html.button [ HtmlE.onClick Step ] [ Html.text "Step" ]
+                    [ Html.div []
+                        [ case state.playback of
+                            Paused ->
+                                Html.button [ HtmlE.onClick Play ] [ Html.text "Play" ]
+
+                            Playing ->
+                                Html.button [ HtmlE.onClick Pause ] [ Html.text "Pause" ]
+                        , Html.button [ HtmlE.onClick Step ] [ Html.text "Step" ]
                         , Html.button [ HtmlE.onClick Reset ] [ Html.text "Reset" ]
-                        , Html.text ("Water: " ++ String.fromInt (Dict.size state.water))
+                        , Html.button [ HtmlE.onClick ToggleRender ] [ Html.text "Toggle redering" ]
                         ]
-                    , Svg.svg
-                        [ SvgA.width (toWidth state)
-                        , SvgA.height (toHeight state)
-                        , SvgA.viewBox (toViewBox state)
-                        , SvgA.style "width: 60%; height: auto; background: wheat"
+                    , Html.p []
+                        [ Html.text <|
+                            "Iteration: "
+                                ++ String.fromInt state.iteration
+                                ++ ", "
+                                ++ "Water: "
+                                ++ String.fromInt (Dict.size state.water)
                         ]
-                        [ SvgK.node "g"
-                            []
-                            (unitSquareAt "blue" ( center, 0 )
-                                :: List.map renderClay (Set.toList state.clay)
-                                ++ List.map renderWater (Dict.toList state.water)
-                            )
-                        ]
+                    , if state.render then
+                        Svg.svg
+                            [ SvgA.width (toWidth state)
+                            , SvgA.height (toHeight state)
+                            , SvgA.viewBox (toViewBox state)
+                            , SvgA.style "width: 60%; height: auto; background: wheat"
+                            ]
+                            [ SvgK.node "g"
+                                []
+                                (unitSquareAt "blue" ( center, 0 )
+                                    :: List.map renderClay (Set.toList state.clay)
+                                    ++ List.map renderWater (Dict.toList state.water)
+                                )
+                            ]
+
+                      else
+                        Html.p [] [ Html.text "Not rendering anything ..." ]
                     ]
         ]
 
@@ -198,19 +299,81 @@ step state =
         | iteration = state.iteration + 1
         , water =
             state.water
-                |> restWater state.clay
                 |> flowWater state.clay
+                |> restWater state.clay
+                |> trimWater state.maximumY
                 |> Dict.insert ( 500, 1 ) Flowing
     }
 
 
-
--- TODO
+trimWater : Int -> Dict.Dict Point Water -> Dict.Dict Point Water
+trimWater maximumY =
+    Dict.filter (\( _, y ) _ -> y <= maximumY)
 
 
 restWater : Set.Set Point -> Dict.Dict Point Water -> Dict.Dict Point Water
 restWater clay waters =
     waters
+        |> findRows clay
+        |> List.filter (isSupported clay waters)
+        |> List.foldl
+            (\( y, xs ) dict ->
+                List.foldl
+                    (\x -> Dict.insert ( x, y ) Resting)
+                    dict
+                    xs
+            )
+            waters
+
+
+isSupported : Set.Set Point -> Dict.Dict Point Water -> ( Int, List Int ) -> Bool
+isSupported clay waters ( y, xs ) =
+    List.all
+        (\x ->
+            let
+                down =
+                    ( x, y + 1 )
+
+                fromBelow =
+                    Set.member down clay || Dict.get down waters == Just Resting
+
+                left =
+                    ( x - 1, y )
+
+                onLeft =
+                    Set.member left clay || Dict.member left waters
+
+                right =
+                    ( x + 1, y )
+
+                onRight =
+                    Set.member right clay || Dict.member right waters
+            in
+            fromBelow && onLeft && onRight
+        )
+        xs
+
+
+findRows : Set.Set Point -> Dict.Dict Point Water -> List ( Int, List Int )
+findRows clay waters =
+    waters
+        |> Dict.filter (\_ water -> water == Flowing)
+        |> Dict.keys
+        |> List.sortBy (\( x, y ) -> ( y, x ))
+        |> List.foldl
+            (\( x, y ) rows ->
+                case rows of
+                    ( y1, x1 :: xs ) :: rest ->
+                        if y == y1 && x == x1 + 1 then
+                            ( y, x :: x1 :: xs ) :: rest
+
+                        else
+                            ( y, [ x ] ) :: ( y1, x1 :: xs ) :: rows
+
+                    _ ->
+                        ( y, [ x ] ) :: rows
+            )
+            []
 
 
 flowWater : Set.Set Point -> Dict.Dict Point Water -> Dict.Dict Point Water
@@ -233,7 +396,7 @@ flowWater clay waters =
                             ( x + 1, y )
 
                         occupied point =
-                            Set.member point clay || Dict.get point dict == Just Resting
+                            Set.member point clay || Dict.get point waters == Just Resting
                     in
                     if occupied down then
                         case ( occupied left, occupied right ) of
@@ -263,7 +426,14 @@ type alias State =
     , maximumY : Int
     , water : Dict.Dict Point Water
     , iteration : Int
+    , playback : Playback
+    , render : Bool
     }
+
+
+type Playback
+    = Paused
+    | Playing
 
 
 type alias Point =
@@ -291,6 +461,8 @@ scanToState scan =
                 , maximumY = maximumY
                 , water = Dict.empty
                 , iteration = 0
+                , playback = Paused
+                , render = True
                 }
 
         _ ->
@@ -305,7 +477,7 @@ veinToPoints vein =
 parseInput : String -> Result String State
 parseInput input =
     Parser.run scanParser input
-        |> Result.mapError Debug.toString
+        |> Result.mapError Parser.deadEndsToString
         |> Result.andThen scanToState
 
 
