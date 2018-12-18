@@ -1,7 +1,6 @@
 module Main exposing (main)
 
 import Browser
-import Dict
 import Html
 import Html.Attributes as HtmlA
 import Html.Events as HtmlE
@@ -32,7 +31,7 @@ subscriptions model =
         Ok state ->
             case state.playback of
                 Playing ->
-                    Time.every 10 (\_ -> Tick)
+                    Time.every 1 (\_ -> Tick)
 
                 Paused ->
                     Sub.none
@@ -89,17 +88,7 @@ update message model =
 
                 Ok state ->
                     if state.playback == Playing then
-                        let
-                            newState =
-                                step state
-                        in
-                        if newState.water == state.water then
-                            ( { model | output = Ok { state | playback = Paused } }
-                            , Cmd.none
-                            )
-
-                        else
-                            ( { model | output = Ok (step state) }, Cmd.none )
+                        ( { model | output = Ok (step state) }, Cmd.none )
 
                     else
                         ( model, Cmd.none )
@@ -151,7 +140,8 @@ update message model =
                             Ok
                                 { state
                                     | iteration = 0
-                                    , water = Dict.empty
+                                    , resting = Set.empty
+                                    , flowing = Set.empty
                                     , playback = Paused
                                 }
                       }
@@ -195,7 +185,7 @@ view model =
                                 ++ String.fromInt state.iteration
                                 ++ ", "
                                 ++ "Water: "
-                                ++ String.fromInt (Dict.size state.water)
+                                ++ String.fromInt (Set.size state.resting + Set.size state.flowing)
                         ]
                     , if state.render then
                         Svg.svg
@@ -208,7 +198,8 @@ view model =
                                 []
                                 (unitSquareAt "blue" ( center, 0 )
                                     :: List.map renderClay (Set.toList state.clay)
-                                    ++ List.map renderWater (Dict.toList state.water)
+                                    ++ List.map renderRestingWater (Set.toList state.resting)
+                                    ++ List.map renderFlowingWater (Set.toList state.flowing)
                                 )
                             ]
 
@@ -223,17 +214,14 @@ renderClay point =
     unitSquareAt "grey" point
 
 
-renderWater : ( Point, Water ) -> ( String, Svg.Svg Message )
-renderWater ( point, water ) =
-    unitSquareAt
-        (case water of
-            Flowing ->
-                "aqua"
+renderRestingWater : Point -> ( String, Svg.Svg Message )
+renderRestingWater point =
+    unitSquareAt "teal" point
 
-            Resting ->
-                "teal"
-        )
-        point
+
+renderFlowingWater : Point -> ( String, Svg.Svg Message )
+renderFlowingWater point =
+    unitSquareAt "aqua" point
 
 
 center : Int
@@ -295,128 +283,124 @@ type Water
 
 step : State -> State
 step state =
+    let
+        flowing =
+            flowWater state.maximumY state.clay state.resting state.flowing
+
+        resting =
+            restWater state.clay state.resting flowing
+    in
     { state
         | iteration = state.iteration + 1
-        , water =
-            state.water
-                |> flowWater state.clay
-                |> restWater state.clay
-                |> trimWater state.maximumY
-                |> Dict.insert ( 500, 1 ) Flowing
+        , flowing = Set.insert ( 500, 1 ) (Set.diff flowing resting)
+        , resting = resting
     }
 
 
-trimWater : Int -> Dict.Dict Point Water -> Dict.Dict Point Water
-trimWater maximumY =
-    Dict.filter (\( _, y ) _ -> y <= maximumY)
-
-
-restWater : Set.Set Point -> Dict.Dict Point Water -> Dict.Dict Point Water
-restWater clay waters =
-    waters
-        |> findRows clay
-        |> List.filter (isSupported clay waters)
+restWater : Set.Set Point -> Set.Set Point -> Set.Set Point -> Set.Set Point
+restWater clay resting flowing =
+    flowing
+        |> findRows
+        |> List.filter (isSupported clay resting flowing)
         |> List.foldl
-            (\( y, xs ) dict ->
-                List.foldl
-                    (\x -> Dict.insert ( x, y ) Resting)
-                    dict
-                    xs
-            )
-            waters
+            (\( y, xs ) r -> List.foldl (\x -> Set.insert ( x, y )) r xs)
+            resting
 
 
-isSupported : Set.Set Point -> Dict.Dict Point Water -> ( Int, List Int ) -> Bool
-isSupported clay waters ( y, xs ) =
+isSupported : Set.Set Point -> Set.Set Point -> Set.Set Point -> ( Int, List Int ) -> Bool
+isSupported clay resting flowing ( y, xs ) =
     List.all
         (\x ->
-            let
-                down =
+            (let
+                p =
                     ( x, y + 1 )
-
-                fromBelow =
-                    Set.member down clay || Dict.get down waters == Just Resting
-
-                left =
-                    ( x - 1, y )
-
-                onLeft =
-                    Set.member left clay || Dict.member left waters
-
-                right =
-                    ( x + 1, y )
-
-                onRight =
-                    Set.member right clay || Dict.member right waters
-            in
-            fromBelow && onLeft && onRight
+             in
+             Set.member p clay || Set.member p resting
+            )
+                && (let
+                        p =
+                            ( x - 1, y )
+                    in
+                    Set.member p clay || Set.member p resting || Set.member p flowing
+                   )
+                && (let
+                        p =
+                            ( x + 1, y )
+                    in
+                    Set.member p clay || Set.member p resting || Set.member p flowing
+                   )
         )
         xs
 
 
-findRows : Set.Set Point -> Dict.Dict Point Water -> List ( Int, List Int )
-findRows clay waters =
-    waters
-        |> Dict.filter (\_ water -> water == Flowing)
-        |> Dict.keys
-        |> List.sortBy (\( x, y ) -> ( y, x ))
-        |> List.foldl
-            (\( x, y ) rows ->
-                case rows of
-                    ( y1, x1 :: xs ) :: rest ->
-                        if y == y1 && x == x1 + 1 then
-                            ( y, x :: x1 :: xs ) :: rest
-
-                        else
-                            ( y, [ x ] ) :: ( y1, x1 :: xs ) :: rows
-
-                    _ ->
-                        ( y, [ x ] ) :: rows
-            )
-            []
+findRows : Set.Set Point -> List ( Int, List Int )
+findRows flowing =
+    flowing
+        |> Set.toList
+        |> List.sortBy yFirst
+        |> List.foldl findOne []
 
 
-flowWater : Set.Set Point -> Dict.Dict Point Water -> Dict.Dict Point Water
-flowWater clay waters =
-    List.foldl
-        (\( ( x, y ), water ) dict ->
-            case water of
-                Resting ->
-                    Dict.insert ( x, y ) Resting dict
+yFirst ( x, y ) =
+    ( y, x )
 
-                Flowing ->
-                    let
-                        down =
-                            ( x, y + 1 )
 
-                        left =
-                            ( x - 1, y )
+findOne ( x, y ) rows =
+    case rows of
+        ( y1, x1 :: xs ) :: rest ->
+            if y == y1 && x == x1 + 1 then
+                ( y, x :: x1 :: xs ) :: rest
 
-                        right =
-                            ( x + 1, y )
+            else
+                ( y, [ x ] ) :: ( y1, x1 :: xs ) :: rows
 
-                        occupied point =
-                            Set.member point clay || Dict.get point waters == Just Resting
-                    in
-                    if occupied down then
-                        case ( occupied left, occupied right ) of
-                            ( True, True ) ->
-                                Dict.insert ( x, y ) Resting dict
+        _ ->
+            ( y, [ x ] ) :: rows
 
-                            ( True, False ) ->
-                                Dict.insert right Flowing dict
 
-                            ( False, True ) ->
-                                Dict.insert left Flowing dict
+flowWater : Int -> Set.Set Point -> Set.Set Point -> Set.Set Point -> Set.Set Point
+flowWater maximumY clay resting flowing =
+    Set.foldl (flowOne maximumY clay resting) Set.empty flowing
 
-                            ( False, False ) ->
-                                Dict.insert left Flowing (Dict.insert right Flowing dict)
 
-                    else
-                        Dict.insert down Flowing dict
-        )
-        Dict.empty
-        (Dict.toList waters)
+flowOne maximumY clay resting ( x, y ) set =
+    let
+        newY =
+            y + 1
+
+        down =
+            ( x, newY )
+    in
+    if isOccupied clay resting down then
+        let
+            left =
+                ( x - 1, y )
+
+            right =
+                ( x + 1, y )
+        in
+        case ( isOccupied clay resting left, isOccupied clay resting right ) of
+            ( True, True ) ->
+                Set.insert ( x, y ) set
+
+            ( True, False ) ->
+                Set.insert right set
+
+            ( False, True ) ->
+                Set.insert left set
+
+            ( False, False ) ->
+                Set.insert right (Set.insert left set)
+
+    else if newY > maximumY then
+        set
+
+    else
+        Set.insert down set
+
+
+isOccupied clay resting point =
+    Set.member point clay || Set.member point resting
 
 
 type alias State =
@@ -424,7 +408,8 @@ type alias State =
     , minimumX : Int
     , maximumX : Int
     , maximumY : Int
-    , water : Dict.Dict Point Water
+    , resting : Set.Set Point
+    , flowing : Set.Set Point
     , iteration : Int
     , playback : Playback
     , render : Bool
@@ -459,7 +444,8 @@ scanToState scan =
                 , minimumX = minimumX
                 , maximumX = maximumX
                 , maximumY = maximumY
-                , water = Dict.empty
+                , resting = Set.empty
+                , flowing = Set.empty
                 , iteration = 0
                 , playback = Paused
                 , render = True
