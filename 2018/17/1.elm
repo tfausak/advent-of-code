@@ -9,6 +9,7 @@ import Parser exposing ((|.), (|=))
 import Set
 import Svg
 import Svg.Attributes as SvgA
+import Svg.Keyed as SvgK
 
 
 main : Program Flags Model Message
@@ -94,10 +95,10 @@ view model =
 
             Ok state ->
                 Html.div []
-                    [ Html.p [] [ Html.text (Debug.toString state) ]
-                    , Html.p []
+                    [ Html.p []
                         [ Html.button [ HtmlE.onClick Step ] [ Html.text "Step" ]
                         , Html.button [ HtmlE.onClick Reset ] [ Html.text "Reset" ]
+                        , Html.text ("Water: " ++ String.fromInt (Dict.size state.water))
                         ]
                     , Svg.svg
                         [ SvgA.width (toWidth state)
@@ -105,20 +106,23 @@ view model =
                         , SvgA.viewBox (toViewBox state)
                         , SvgA.style "width: 60%; height: auto; background: wheat"
                         ]
-                        (unitSquareAt "blue" ( center, 0 )
-                            :: List.map renderClay (Set.toList state.clay)
-                            ++ List.map renderWater (Dict.toList state.water)
-                        )
+                        [ SvgK.node "g"
+                            []
+                            (unitSquareAt "blue" ( center, 0 )
+                                :: List.map renderClay (Set.toList state.clay)
+                                ++ List.map renderWater (Dict.toList state.water)
+                            )
+                        ]
                     ]
         ]
 
 
-renderClay : Point -> Svg.Svg Message
+renderClay : Point -> ( String, Svg.Svg Message )
 renderClay point =
     unitSquareAt "grey" point
 
 
-renderWater : ( Point, Water ) -> Svg.Svg Message
+renderWater : ( Point, Water ) -> ( String, Svg.Svg Message )
 renderWater ( point, water ) =
     unitSquareAt
         (case water of
@@ -136,9 +140,10 @@ center =
     500
 
 
-unitSquareAt : String -> Point -> Svg.Svg Message
+unitSquareAt : String -> Point -> ( String, Svg.Svg Message )
 unitSquareAt color ( x, y ) =
-    Svg.rect
+    ( "s-" ++ String.fromInt x ++ "-" ++ String.fromInt y
+    , Svg.rect
         [ SvgA.width "1"
         , SvgA.height "1"
         , SvgA.x (String.fromInt x)
@@ -146,11 +151,12 @@ unitSquareAt color ( x, y ) =
         , SvgA.fill color
         ]
         []
+    )
 
 
 toViewBox : State -> String
 toViewBox state =
-    String.fromInt state.minimumX
+    String.fromInt (state.minimumX - 1)
         ++ " 0 "
         ++ toWidth state
         ++ " "
@@ -159,7 +165,7 @@ toViewBox state =
 
 toWidth : State -> String
 toWidth state =
-    String.fromInt (state.maximumX - state.minimumX + 1)
+    String.fromInt (state.maximumX - state.minimumX + 3)
 
 
 toHeight : State -> String
@@ -190,12 +196,25 @@ step : State -> State
 step state =
     { state
         | iteration = state.iteration + 1
-        , water = Dict.insert ( 500, 1 ) Flowing (simulate state.clay state.water)
+        , water =
+            state.water
+                |> restWater state.clay
+                |> flowWater state.clay
+                |> Dict.insert ( 500, 1 ) Flowing
     }
 
 
-simulate : Set.Set Point -> Dict.Dict Point Water -> Dict.Dict Point Water
-simulate clay waters =
+
+-- TODO
+
+
+restWater : Set.Set Point -> Dict.Dict Point Water -> Dict.Dict Point Water
+restWater clay waters =
+    waters
+
+
+flowWater : Set.Set Point -> Dict.Dict Point Water -> Dict.Dict Point Water
+flowWater clay waters =
     List.foldl
         (\( ( x, y ), water ) dict ->
             case water of
@@ -217,18 +236,18 @@ simulate clay waters =
                             Set.member point clay || Dict.get point dict == Just Resting
                     in
                     if occupied down then
-                        if occupied left && occupied right then
-                            -- TODO
-                            dict
+                        case ( occupied left, occupied right ) of
+                            ( True, True ) ->
+                                Dict.insert ( x, y ) Resting dict
 
-                        else if occupied left then
-                            Dict.insert right Flowing dict
+                            ( True, False ) ->
+                                Dict.insert right Flowing dict
 
-                        else if occupied right then
-                            Dict.insert left Flowing dict
+                            ( False, True ) ->
+                                Dict.insert left Flowing dict
 
-                        else
-                            Dict.insert left Flowing (Dict.insert right Flowing dict)
+                            ( False, False ) ->
+                                Dict.insert left Flowing (Dict.insert right Flowing dict)
 
                     else
                         Dict.insert down Flowing dict
