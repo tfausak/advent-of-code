@@ -2,56 +2,45 @@
 import qualified Data.Graph.Inductive as Graph
 import qualified Data.Map as Map
 import qualified Debug.Trace as Debug
+import qualified Text.Printf as Printf
 
 main
-  = putStrLn
-  . render
-  . Map.insert origin 'X'
-  . walk [] origin Map.empty
+  = print
+  . maximum
+  . map snd
+  . Graph.level 0
+  . walk [] origin (Map.singleton (0, 0) 0) []
   =<< readFile "input.txt"
 
-render area = let
-  ((xl, xh), (yl, yh)) = foldr
-    (\ (x, y) ((xl, xh), (yl, yh)) ->
-      ((min xl x, max xh x), (min yl y, max yh y)))
-    ((maxBound, minBound), (maxBound, minBound))
-    (Map.keys area)
-  in unlines (map
-    (\ y -> map
-      (\ x -> Map.findWithDefault '#' (x, y) area)
-      [xl .. xh])
-    [yl .. yh])
-
-origin :: (Int, Int)
 origin = (0, 0)
 
-walk points (x, y) area directions = case directions of
-  "" -> area
-  d : ds -> case d of
-    '^' -> walk points (x, y) area ds
-    'W' -> walk points (x - 2, y) (horizontal (x - 1, y) area) ds
-    'E' -> walk points (x + 2, y) (horizontal (x + 1, y) area) ds
-    'N' -> walk points (x, y - 2) (vertical (x, y - 1) area) ds
-    'S' -> walk points (x, y + 2) (vertical (x, y + 1) area) ds
-    '(' -> walk ((x, y) : points) (x, y) area ds
-    '|' -> case points of { p : ps -> walk points p area ds }
-    ')' -> case points of { p : ps -> walk ps p area ds }
-    '$' -> walk points (x, y) area ds
-    '\n' -> walk points (x, y) area ds
-    _ -> error (show d)
+walk
+  :: [Point]
+  -> Point
+  -> Map.Map (Int, Int) Int
+  -> [Graph.UEdge]
+  -> String
+  -> Graph.UGr
+walk ps p ns es ds = case (ds, ps) of
+  ("", _) -> Graph.mkGraph (map (\ n -> (n, ())) $ Map.elems ns) es
+  ('^' : ds', _) -> walk ps p ns es ds'
+  ('N' : ds', _) -> let q = goN p; ns' = Map.insertWith (flip const) q (Map.size ns) ns in walk ps q ns' (edge ns' p q : es) ds'
+  ('E' : ds', _) -> let q = goE p; ns' = Map.insertWith (flip const) q (Map.size ns) ns in walk ps q ns' (edge ns' p q : es) ds'
+  ('S' : ds', _) -> let q = goS p; ns' = Map.insertWith (flip const) q (Map.size ns) ns in walk ps q ns' (edge ns' p q : es) ds'
+  ('W' : ds', _) -> let q = goW p; ns' = Map.insertWith (flip const) q (Map.size ns) ns in walk ps q ns' (edge ns' p q : es) ds'
+  ('(' : ds', _) -> walk (p : ps) p ns es ds'
+  ('|' : ds', q : _) -> walk ps q ns es ds'
+  (')' : ds', q : qs) -> walk qs q ns es ds'
+  ('$' : ds', _) -> walk ps p ns es ds'
+  ('\n' : ds', _) -> walk ps p ns es ds'
 
-horizontal (x, y) area
-  = Map.insert (x - 1, y) '.'
-  . Map.insert (x + 1, y) '.'
-  . Map.insert (x, y - 1) '#'
-  . Map.insert (x, y + 1) '#'
-  . Map.insert (x, y) '|'
-  $ area
+goN (x, y) = (x, y - 1)
+goE (x, y) = (x + 1, y)
+goS (x, y) = (x, y + 1)
+goW (x, y) = (x - 1, y)
 
-vertical (x, y) area
-  = Map.insert (x, y - 1) '.'
-  . Map.insert (x, y + 1) '.'
-  . Map.insert (x - 1, y) '#'
-  . Map.insert (x + 1, y) '#'
-  . Map.insert (x, y) '-'
-  $ area
+node ns p = (ns Map.! p, ())
+
+edge ns p q = (ns Map.! p, ns Map.! q, ())
+
+type Point = (Int, Int)
