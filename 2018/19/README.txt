@@ -43,3 +43,9 @@ In detail, when running this program, the following events occur:
 - The instruction pointer is 6, so the instruction seti 9 0 5 stores 9 into register 5. The instruction pointer is incremented, causing it to point outside the program, and so the program ends.
 
 What value is left in register 0 when the background process halts?
+
+--- Part Two ---
+
+A new background process immediately spins up in its place. It appears identical, but on closer inspection, you notice that this time, register 0 started with the value 1.
+
+What value is left in register 0 when this new background process halts?
