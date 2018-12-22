@@ -9,6 +9,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 -- answer 1059 is too high
+-- answer 1051 is too high (and correct for someone else!)
 
 main :: IO ()
 main = do
@@ -21,7 +22,7 @@ solve :: STM.TVar Cave -> STM.STM (Maybe Weight)
 solve caveVar = do
   Target (Coordinate (X tx) (Y ty)) <- fmap caveTarget (STM.readTVar caveVar)
   let
-    xMax = 2 * tx
+    xMax = 3 * tx
     yMax = 2 * ty
     xs = [0 .. xMax]
     ys = [0 .. yMax]
@@ -43,15 +44,17 @@ solve caveVar = do
   nodes <- STM.readTVar nodesVar
 
   edgesVar <- STM.newTVar Set.empty
-  Monad.forM_ (Map.toList nodes) (\ (Node fromCoordinate fromTool, fromSerial) ->
+  Monad.forM_ (Map.toList nodes) (\ (Node fromCoordinate fromTool, fromSerial) -> do
+    Monad.forM_ (filter (/= fromTool) tools) (\ toTool ->
+      case Map.lookup (Node fromCoordinate toTool) nodes of
+        Nothing -> pure ()
+        Just toSerial ->
+          STM.modifyTVar edgesVar (addEdge fromSerial toSerial 7))
     Monad.forM_ (getNeighbors fromCoordinate) (\ toCoordinate ->
-      Monad.forM_ tools (\ toTool ->
-        case Map.lookup (Node toCoordinate toTool) nodes of
-          Nothing -> pure ()
-          Just toSerial -> do
-            let from = (fromTool, fromSerial)
-            let to = (toTool, toSerial)
-            STM.modifyTVar edgesVar (addEdge from to))))
+      case Map.lookup (Node toCoordinate fromTool) nodes of
+        Nothing -> pure ()
+        Just toSerial ->
+          STM.modifyTVar edgesVar (addEdge fromSerial toSerial 1)))
   edges <- STM.readTVar edgesVar
 
   from <- maybe
@@ -78,12 +81,12 @@ addNode node nodes =
   Map.insertWith (\ _ old -> old) node (Serial (Map.size nodes)) nodes
 
 addEdge
-  :: (Maybe Tool, Serial)
-  -> (Maybe Tool, Serial)
+  :: Serial
+  -> Serial
+  -> Weight
   -> Set.Set (Serial, Serial, Weight)
   -> Set.Set (Serial, Serial, Weight)
-addEdge (fromTool, fromSerial) (toTool, toSerial) =
-  Set.insert (fromSerial, toSerial, if fromTool == toTool then 1 else 8)
+addEdge from to weight = Set.insert (from, to, weight)
 
 tools :: [Maybe Tool]
 tools =
