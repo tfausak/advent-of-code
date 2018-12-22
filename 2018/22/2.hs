@@ -10,6 +10,7 @@ import qualified Data.Set as Set
 
 -- answer 1059 is too high
 -- answer 1051 is too high (and correct for someone else!)
+-- answer 1040 is too high
 
 main :: IO ()
 main = do
@@ -22,7 +23,7 @@ solve :: STM.TVar Cave -> STM.STM (Maybe Weight)
 solve caveVar = do
   Target (Coordinate (X tx) (Y ty)) <- fmap caveTarget (STM.readTVar caveVar)
   let
-    xMax = 3 * tx
+    xMax = 4 * tx
     yMax = 2 * ty
     xs = [0 .. xMax]
     ys = [0 .. yMax]
