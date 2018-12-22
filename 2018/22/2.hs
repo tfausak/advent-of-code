@@ -2,36 +2,98 @@
 {-# OPTIONS_GHC -Weverything -Wno-implicit-prelude #-}
 module Main ( main ) where
 import qualified Control.Concurrent.STM as STM
+import qualified Control.Monad as Monad
 import qualified Data.Char as Char
+import qualified Data.Graph.Inductive as Graph
 import qualified Data.Map as Map
+import qualified Data.Set as Set
+
+-- answer 1059 is too high
 
 main :: IO ()
 main = do
   [d, tx, ty] <- fmap (map read . words . map keepDigit) (readFile "input.txt")
-  caveRef <- STM.newTVarIO (newCave (Depth d) (X tx) (Y ty))
-  STM.atomically (mapM_
-    (\ y -> mapM_
-      (\ x -> getRegionType caveRef (Coordinate (X x) (Y y)))
-      [0 .. tx])
-    [0 .. ty])
-  putStr . render =<< STM.readTVarIO caveRef
+  caveVar <- STM.newTVarIO (newCave (Depth d) (X tx) (Y ty))
+  Just result <- STM.atomically (solve caveVar)
+  print (unwrapWeight result)
 
-render :: Cave -> String
-render cave =
-  let Target (Coordinate (X tx) (Y ty)) = caveTarget cave
-  in unlines (map
-    (\ y -> map
-      (\ x -> case Map.lookup (Coordinate (X x) (Y y)) (caveRegionTypes cave) of
-        Nothing -> '?'
-        Just regionType -> case regionType of
-          RegionTypeRocky -> '.'
-          RegionTypeWet -> '='
-          RegionTypeNarrow -> '|')
-      [0 .. tx])
-    [0 .. ty])
+solve :: STM.TVar Cave -> STM.STM (Maybe Weight)
+solve caveVar = do
+  Target (Coordinate (X tx) (Y ty)) <- fmap caveTarget (STM.readTVar caveVar)
+  let
+    xMax = 2 * tx
+    yMax = 2 * ty
+    xs = [0 .. xMax]
+    ys = [0 .. yMax]
+    coordinates = concatMap (\ x -> map (\ y -> Coordinate (X x) (Y y)) ys) xs
+
+  Monad.forM_ coordinates (getRegionType caveVar)
+  cave <- STM.readTVar caveVar
+
+  nodesVar <- STM.newTVar Map.empty
+  Monad.forM_ coordinates (\ coordinate ->
+    case Map.lookup coordinate (caveRegionTypes cave) of
+      Nothing -> fail "couldn't find region type"
+      Just regionType -> Monad.forM_ tools (\ tool ->
+        case (regionType, tool) of
+          (RegionTypeRocky, Nothing) -> pure ()
+          (RegionTypeWet, Just ToolTorch) -> pure ()
+          (RegionTypeNarrow, Just ToolClimbingGear) -> pure ()
+          _ -> STM.modifyTVar nodesVar (addNode (Node coordinate tool))))
+  nodes <- STM.readTVar nodesVar
+
+  edgesVar <- STM.newTVar Set.empty
+  Monad.forM_ (Map.toList nodes) (\ (Node fromCoordinate fromTool, fromSerial) ->
+    Monad.forM_ (getNeighbors fromCoordinate) (\ toCoordinate ->
+      Monad.forM_ tools (\ toTool ->
+        case Map.lookup (Node toCoordinate toTool) nodes of
+          Nothing -> pure ()
+          Just toSerial -> do
+            let from = (fromTool, fromSerial)
+            let to = (toTool, toSerial)
+            STM.modifyTVar edgesVar (addEdge from to))))
+  edges <- STM.readTVar edgesVar
+
+  from <- maybe
+    (fail "couldn't find origin node")
+    (pure . unwrapSerial)
+    (Map.lookup (Node (Coordinate (X 0) (Y 0)) (Just ToolTorch)) nodes)
+  to <- maybe
+    (fail "couldn't find target node")
+    (pure . unwrapSerial)
+    (Map.lookup (Node (Coordinate (X tx) (Y ty)) (Just ToolTorch)) nodes)
+
+  pure (Graph.spLength from to (makeGraph nodes edges))
+
+makeGraph
+  :: Map.Map Node Serial
+  -> Set.Set (Serial, Serial, Weight)
+  -> Graph.Gr () Weight
+makeGraph nodes edges = Graph.mkGraph
+  (map (\ n -> (unwrapSerial n, ())) (Map.elems nodes))
+  (map (\ (n, m, w) -> (unwrapSerial n, unwrapSerial m, w)) (Set.toList edges))
+
+addNode :: Node -> Map.Map Node Serial -> Map.Map Node Serial
+addNode node nodes =
+  Map.insertWith (\ _ old -> old) node (Serial (Map.size nodes)) nodes
+
+addEdge
+  :: (Maybe Tool, Serial)
+  -> (Maybe Tool, Serial)
+  -> Set.Set (Serial, Serial, Weight)
+  -> Set.Set (Serial, Serial, Weight)
+addEdge (fromTool, fromSerial) (toTool, toSerial) =
+  Set.insert (fromSerial, toSerial, if fromTool == toTool then 1 else 8)
+
+tools :: [Maybe Tool]
+tools =
+  [ Nothing
+  , Just ToolClimbingGear
+  , Just ToolTorch
+  ]
 
 getGeologicIndex :: STM.TVar Cave -> Coordinate -> STM.STM GeologicIndex
-getGeologicIndex caveRef coordinate = cached caveRef
+getGeologicIndex caveVar coordinate = cached caveVar
   (Map.lookup coordinate . caveGeologicIndices)
   (updateGeologicIndices . Map.insert coordinate)
   (\ cave -> do
@@ -44,39 +106,55 @@ getGeologicIndex caveRef coordinate = cached caveRef
     else if unwrapX (coordinateX coordinate) == 0 then
       pure (GeologicIndex (unwrapY (coordinateY coordinate) * 48271))
     else do
-      left <- getErosionLevel caveRef (goLeft coordinate)
-      up <- getErosionLevel caveRef (goUp coordinate)
+      left <- getErosionLevel caveVar (goLeft coordinate)
+      up <- getErosionLevel caveVar (goUp coordinate)
       pure (GeologicIndex (unwrapErosionLevel left * unwrapErosionLevel up)))
 
 getErosionLevel :: STM.TVar Cave -> Coordinate -> STM.STM ErosionLevel
-getErosionLevel caveRef coordinate = cached caveRef
+getErosionLevel caveVar coordinate = cached caveVar
   (Map.lookup coordinate . caveErosionLevels)
   (updateErosionLevels . Map.insert coordinate)
   (\ cave -> do
-    geologicIndex <- getGeologicIndex caveRef coordinate
+    geologicIndex <- getGeologicIndex caveVar coordinate
     pure (ErosionLevel (rem
       (unwrapGeologicIndex geologicIndex + unwrapDepth (caveDepth cave))
       20183)))
 
 getRegionType :: STM.TVar Cave -> Coordinate -> STM.STM RegionType
-getRegionType caveRef coordinate = cached caveRef
+getRegionType caveVar coordinate = cached caveVar
   (Map.lookup coordinate . caveRegionTypes)
   (updateRegionTypes . Map.insert coordinate)
   (\ _ -> do
-    erosionLevel <- getErosionLevel caveRef coordinate
+    erosionLevel <- getErosionLevel caveVar coordinate
     case rem (unwrapErosionLevel erosionLevel) 3 of
       0 -> pure RegionTypeRocky
       1 -> pure RegionTypeWet
       2 -> pure RegionTypeNarrow
-      _ -> fail "impossible")
+      _ -> fail "math stopped working")
 
-goLeft :: Coordinate -> Coordinate
-goLeft coordinate =
-  coordinate { coordinateX = X (unwrapX (coordinateX coordinate) - 1) }
+getNeighbors :: Coordinate -> [Coordinate]
+getNeighbors coordinate =
+  [ goUp coordinate
+  , goRight coordinate
+  , goDown coordinate
+  , goLeft coordinate
+  ]
 
 goUp :: Coordinate -> Coordinate
 goUp coordinate =
   coordinate { coordinateY = Y (unwrapY (coordinateY coordinate) - 1) }
+
+goRight :: Coordinate -> Coordinate
+goRight coordinate =
+  coordinate { coordinateX = X (unwrapX (coordinateX coordinate) + 1) }
+
+goDown :: Coordinate -> Coordinate
+goDown coordinate =
+  coordinate { coordinateY = Y (unwrapY (coordinateY coordinate) + 1) }
+
+goLeft :: Coordinate -> Coordinate
+goLeft coordinate =
+  coordinate { coordinateX = X (unwrapX (coordinateX coordinate) - 1) }
 
 cached
   :: STM.TVar Cave
@@ -113,6 +191,35 @@ newCave d x y = Cave d (Target (Coordinate x y)) Map.empty Map.empty Map.empty
 
 keepDigit :: Char -> Char
 keepDigit char = if Char.isDigit char then char else ' '
+
+newtype Weight = Weight
+  { unwrapWeight :: Double
+  } deriving (Eq, Ord, Show)
+
+instance Num Weight where
+  fromInteger = Weight . fromInteger
+  abs = Weight . abs . unwrapWeight
+  negate = Weight . negate . unwrapWeight
+  signum = Weight . signum . unwrapWeight
+  x + y = Weight (unwrapWeight x + unwrapWeight y)
+  x * y = Weight (unwrapWeight x * unwrapWeight y)
+
+instance Real Weight where
+  toRational = toRational . unwrapWeight
+
+newtype Serial = Serial
+  { unwrapSerial :: Int
+  } deriving (Eq, Ord, Show)
+
+data Node = Node
+  { nodeCoordinate :: Coordinate
+  , nodeTool :: Maybe Tool
+  } deriving (Eq, Ord, Show)
+
+data Tool
+  = ToolClimbingGear
+  | ToolTorch
+  deriving (Eq, Ord, Show)
 
 data Cave = Cave
   { caveDepth :: Depth
