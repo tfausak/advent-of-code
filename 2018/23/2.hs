@@ -3,16 +3,12 @@ import qualified Data.SBV as SBV
 import qualified Text.ParserCombinators.ReadP as Parse
 
 main = do
-  nanobots <- (\xs->xs::[Nanobot]) . map read . lines <$> readFile "input.txt"
-
+  nanobots <- map read . lines <$> readFile "input.txt"
   model <- SBV.optimize SBV.Lexicographic $ do
     [x, y, z] <- SBV.sIntegers ["x", "y", "z"]
-
     SBV.maximize "nanobots-in-range" . sum $ map
       ((\ n -> n :: SBV.SInteger) . inRange x y z) nanobots
-
     SBV.minimize "distance-to-origin" $ manhattanDistance 0 0 0 x y z
-
   print model
 
 inRange x y z n = SBV.oneIf . (SBV..<= SBV.literal (nr n)) $ manhattanDistance
