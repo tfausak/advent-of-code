@@ -6,8 +6,9 @@ solutions in Haskell, and I recommend that you use [Stack][] to run them. For
 example:
 
 ``` sh
-$ stack 2018/1/1.hs < 2018/1/input.txt
-439
+$ cd 2017/1
+$ stack 1.hs
+1031
 ```
 
 When working on solutions, I typically use [ghcid][] to get fast feedback. For
@@ -16,7 +17,7 @@ instance:
 ``` sh
 $ cd 2017/1
 $ stack --resolver lts-13.0 exec --package ghcid -- \
-  ghcid --command 'ghci 1.hs' --test main
+  ghcid --test main 1.hs
 ...
 ```
 
