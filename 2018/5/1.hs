@@ -4,25 +4,22 @@ import qualified Data.Char
 import qualified Data.Maybe
 import qualified Numeric.Natural
 
-{-
-
-This is a pithy Haskell solution:
-
-> main = interact
->   $ show
->   . length
->   . foldr
->     (\ c s -> case s of
->       "" -> [c]
->       h : t -> if toLower c == toLower h && c /= h
->         then t else c : s)
->     ""
->   . filter isAlpha
-
-But I thought it would be fun to write a more verbose, Elm-like solution
-instead. Haskell doesn't have to be all polymorphic and point free!
-
--}
+-- This is a pithy Haskell solution:
+--
+-- > import Data.Char
+-- > main = interact
+-- >   $ show
+-- >   . length
+-- >   . foldr
+-- >     (\ c s -> case s of
+-- >       "" -> [c]
+-- >       h : t -> if toLower c == toLower h && c /= h
+-- >         then t else c : s)
+-- >     ""
+-- >   . filter isAlpha
+--
+-- But I thought it would be fun to write a more verbose, Elm-like solution
+-- instead. Haskell doesn't have to be all polymorphic and point free!
 
 
 main :: IO ()
@@ -40,8 +37,17 @@ x |> f =
   f x
 
 
-newtype Unit
-  = Unit Char
+data Unit
+  = Unit Type Polarity
+
+
+newtype Type
+  = Type Char
+
+
+data Polarity
+  = Positive
+  | Negative
 
 
 data Polymer
@@ -51,9 +57,29 @@ data Polymer
 
 toUnit :: Char -> Maybe Unit
 toUnit char =
-  if Data.Char.isAlpha char
-    then Just ( Unit char )
-    else Nothing
+  case toType char of
+    Just type_ ->
+      let polarity = toPolarity char
+      in Just ( Unit type_ polarity )
+
+    Nothing ->
+      Nothing
+
+
+toType :: Char -> Maybe Type
+toType char =
+  if Data.Char.isAlpha char then
+    Just ( Type ( Data.Char.toUpper char ) )
+  else
+    Nothing
+
+
+toPolarity :: Char -> Polarity
+toPolarity char =
+  if Data.Char.isUpper char then
+    Positive
+  else
+    Negative
 
 
 react :: Unit -> Polymer -> Polymer
@@ -75,13 +101,21 @@ doesReact x y =
 
 
 isSameType :: Unit -> Unit -> Bool
-isSameType (Unit x) (Unit y) =
-  Data.Char.toLower x == Data.Char.toLower y
+isSameType (Unit (Type x) _) (Unit (Type y) _) =
+  x == y
 
 
 isOppositePolarity :: Unit -> Unit -> Bool
-isOppositePolarity (Unit x) (Unit y) =
-  x /= y
+isOppositePolarity (Unit _ x) (Unit _ y) =
+  case ( x, y ) of
+    ( Positive, Negative ) ->
+      True
+
+    ( Negative, Positive ) ->
+      True
+
+    _ ->
+      False
 
 
 polymerLength :: Polymer -> Numeric.Natural.Natural
