@@ -22,6 +22,8 @@ dabCBAcaDA        No further actions can be taken.
 
 After all possible reactions, the resulting polymer contains 10 units.
 
+How many units remain after fully reacting the polymer you scanned? (Note: in this puzzle and others, the input is large; if you copy/paste your input, make sure you get the whole thing.)
+
 --- Part Two ---
 
 Time to improve the polymer.
